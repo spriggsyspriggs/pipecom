@@ -5,9 +5,15 @@ Basic usage:
 Dim As String stdout, stderr
 Dim As Long exit_code
 exit_code = pipecom("dir", stdout, stderr) 'stdout and stderr are stored in the provided strings
+
+'This is always necessary
+'$Include:'pipecom.bas'
 ```
 There are also "lite" wrappers provided for quick usage of pipecom:
 ```vbnet
 Print pipecom_lite("dir") 'this version of pipecom_lite returns stderr if it is not empty, or stdout if it is
 pipecom_lite "dir" 'ideally, this would be a shelled command that you would not intend to read the results of
+
+'This is always necessary
+'$Include:'pipecom.bas'
 ```
