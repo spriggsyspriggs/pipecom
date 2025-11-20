@@ -52,10 +52,7 @@ Function pipecom& (cmd As String, stdout As String, stderr As String)
             ' https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-process_information
             Type PROCESS_INFORMATION
                 As _Offset hProcess, hThread
-                As _Unsigned Long dwProcessId
-        $If 64BIT Then
-                    As String * 4 padding
-        $End If
+                As _Unsigned Long dwProcessId, dwThreadId
             End Type
 
             ' --- Win32 API Constants ---
@@ -65,21 +62,18 @@ Function pipecom& (cmd As String, stdout As String, stderr As String)
             Const WAIT_FAILED = &HFFFFFFFF          ' Return value for Wait error
 
             ' --- Win32 API Function Declarations ---
-            Declare CustomType Library
+            Declare Dynamic Library "kernel32"
                 ' https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-createpipe
                 Function CreatePipe& (ByVal hReadPipe As _Offset, Byval hWritePipe As _Offset, Byval lpPipeAttributes As _Offset, Byval nSize As _Unsigned Long)
                 
                 ' https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessa
-                Function CreateProcess& (ByVal lpApplicationName As _Offset, Byval lpCommandLine As _Offset, Byval lpProcessAttributes As _Offset, Byval lpThreadAttributes As _Offset, Byval bInheritHandles As Long, Byval dwCreationFlags As _Unsigned Long, Byval lpEnvironment As _Offset, Byval lpCurrentDirectory As _Offset, Byval lpStartupInfo As _Offset, Byval lpProcessInformation As _Offset)
-                
-                ' https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw
-                Function CreateProcessW& (ByVal lpApplicationName As _Offset, Byval lpCommandLine As _Offset, Byval lpProcessAttributes As _Offset, Byval lpThreadAttributes As _Offset, Byval bInheritHandles As Long, Byval dwCreationFlags As _Unsigned Long, Byval lpEnvironment As _Offset, Byval lpCurrentDirectory As _Offset, Byval lpStartupInfo As _Offset, Byval lpProcessInformation As _Offset)
+                Function CreateProcessA& (ByVal lpApplicationName As _Offset, Byval lpCommandLine As _Offset, Byval lpProcessAttributes As _Offset, Byval lpThreadAttributes As _Offset, Byval bInheritHandles As Long, Byval dwCreationFlags As _Unsigned Long, Byval lpEnvironment As _Offset, Byval lpCurrentDirectory As _Offset, Byval lpStartupInfo As _Offset, Byval lpProcessInformation As _Offset)
                 
                 ' https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getexitcodeprocess
                 Function GetExitCodeProcess& (ByVal hProcess As _Offset, Byval lpExitCode As _Offset)
                 
                 ' https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-closehandle
-                Sub HandleClose Alias "CloseHandle" (ByVal hObject As _Offset)
+                Sub CloseHandle (ByVal hObject As _Offset)
                 
                 ' https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-readfile
                 Function ReadFile& (ByVal hFile As _Offset, Byval lpBuffer As _Offset, Byval nNumberOfBytesToRead As _Unsigned Long, Byval lpNumberOfBytesRead As _Offset, Byval lpOverlapped As _Offset)
@@ -129,7 +123,7 @@ Function pipecom& (cmd As String, stdout As String, stderr As String)
             Dim As _Offset lpEnvironment, lpCurrentDirectory
 
             ' Create the child process
-            ok = CreateProcess(lpApplicationName, _Offset(lpCommandLine), lpProcessAttributes, lpThreadAttributes, bInheritHandles, dwCreationFlags, lpEnvironment, lpCurrentDirectory, _Offset(si), _Offset(procinfo))
+            ok = CreateProcessA(lpApplicationName, _Offset(lpCommandLine), lpProcessAttributes, lpThreadAttributes, bInheritHandles, dwCreationFlags, lpEnvironment, lpCurrentDirectory, _Offset(si), _Offset(procinfo))
 
             If ok = 0 Then
                 pipecom = -1
@@ -139,8 +133,8 @@ Function pipecom& (cmd As String, stdout As String, stderr As String)
             ' Close the "write" ends of the pipes in the parent process.
             ' The child process now holds the only copies.
             ' This is crucial, or ReadFile will never finish.
-            HandleClose hStdOutPipeWrite
-            HandleClose hStdOutPipeError
+            CloseHandle hStdOutPipeWrite
+            CloseHandle hStdOutPipeError
 
             ' Read loop for STDOUT
             Dim As String buf: buf = Space$(4096 + 1)
@@ -170,8 +164,8 @@ Function pipecom& (cmd As String, stdout As String, stderr As String)
             End If
 
             ' Clean up remaining handles
-            HandleClose hStdOutPipeRead
-            HandleClose hStdReadPipeError
+            CloseHandle hStdOutPipeRead
+            CloseHandle hStdReadPipeError
             
             ' Return the exit code
             If ex_stat = 1 Then
@@ -281,8 +275,8 @@ Function pipecom& (cmd As String, stdout As String, stderr As String)
             __close GetHighLong(stderr_pipes)
 
             ' Execute the command using /bin/sh -c "..."
-            ' We add _CHR_NUL for C-string null termination
-            execl "/bin/sh" + _CHR_NUL, "sh" + _CHR_NUL, "-c" + _CHR_NUL, cmd + _CHR_NUL, 0
+            ' We add Chr$(0) for C-string null termination
+            execl "/bin/sh" + Chr$(0), "sh" + Chr$(0), "-c" + Chr$(0), cmd + Chr$(0), 0
                 
             ' If execl returns, an error occurred. Exit with 127.
             System 127
@@ -300,7 +294,7 @@ Function pipecom& (cmd As String, stdout As String, stderr As String)
 
             ' Find the highest file descriptor number for select()
             Dim As Long max_fd
-            If GetLowLong(stdout_pipes) > GetLowLong(stderr_pipes) Then
+            If GetLowLong(stdout_pipes) > GetLowLong(stderr_pipes) THEN
                 max_fd = GetLowLong(stdout_pipes)
             Else
                 max_fd = GetLowLong(stderr_pipes)
@@ -340,7 +334,7 @@ Function pipecom& (cmd As String, stdout As String, stderr As String)
                 End If
 
                 ' Wait indefinitely until one or more pipes have data
-                If __select(max_fd + 1, _Offset(read_fds()), 0, 0, 0) = -1 Then
+                If __select(max_fd + 1, _Offset(read_fds()), 0, 0, 0) = -1 THEN
                     _LogError "An error with __select has occurred"
                     Exit While
                 End If
@@ -348,10 +342,10 @@ Function pipecom& (cmd As String, stdout As String, stderr As String)
                 ' Check if STDOUT pipe has data
                 If GetLowLong(stdout_pipes) <> -1 And FD_ISSET(GetLowLong(stdout_pipes), read_fds()) = -1 Then
                     bytes = __read(GetLowLong(stdout_pipes), _Offset(read_buf), Len(read_buf))
-                    If bytes > 0 Then
+                    If bytes > 0 THEN
                         ' Append data to stdout string
                         stdout = stdout + Mid$(read_buf, 1, bytes)
-                    Else
+                    ELSE
                         ' 0 bytes means EOF. Close the pipe.
                         __close GetLowLong(stdout_pipes)
                         ' Flag it as closed by setting the FD to -1
@@ -361,12 +355,12 @@ Function pipecom& (cmd As String, stdout As String, stderr As String)
                 End If
 
                 ' Check if STDERR pipe has data
-                If GetLowLong(stderr_pipes) <> -1 And FD_ISSET(GetLowLong(stderr_pipes), read_fds()) = -1 Then
+                If GetLowLong(stderr_pipes) <> -1 And FD_ISSET(GetLowLong(stderr_pipes), read_fds()) = -1 THEN
                     bytes = __read(GetLowLong(stderr_pipes), _Offset(read_buf), Len(read_buf))
-                    If bytes > 0 Then
+                    If bytes > 0 THEN
                         ' Append data to stderr string
                         stderr = stderr + Mid$(read_buf, 1, bytes)
-                    Else
+                    ELSE
                         ' 0 bytes means EOF. Close the pipe.
                         __close GetLowLong(stderr_pipes)
                         ' Flag it as closed by setting the FD to -1
@@ -378,7 +372,7 @@ Function pipecom& (cmd As String, stdout As String, stderr As String)
 
             ' Wait for the child process to exit and get its status
             Dim As Long status
-            waitpid pid, _Offset(status), 0
+            waitpid pid, _OFFSET(status), 0
 
             ' Check if the process exited normally
             If WIFEXITED(status) Then
@@ -433,7 +427,7 @@ $Else
     Function FD_ISSET% (fd As Long, arr() As _Integer64)
         ' Replicates: int FD_ISSET(int fd, fd_set *set)
         ' Checks if a specific bit for a file descriptor is set.
-        $If 64BIT Then
+        $If 64BIT THEN
             Const NFDBITS = 64
         $Else
                 Const NFDBITS = 32
