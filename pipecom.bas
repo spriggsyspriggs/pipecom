@@ -110,9 +110,17 @@ Function pipecom& (cmd As String, stdout As String, stderr As String)
             si.hStdInput = 0
             
             Dim As PROCESS_INFORMATION procinfo
+            Dim As String appName
             Dim As _Offset lpApplicationName
             Dim As String lpCommandLine
             
+            appName = Environ$("COMSPEC")
+            If appName = "" Then
+                appName = "cmd.exe"
+            End If
+            appName = appName + Chr$(0)
+            lpApplicationName = _Offset(appName)
+
             ' Prepend "cmd /c " to execute the command in a shell
             ' and add a null terminator for the C API.
             lpCommandLine = "cmd /c " + cmd + Chr$(0)
